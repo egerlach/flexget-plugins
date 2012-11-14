@@ -4,49 +4,84 @@ import urllib
 import urllib2
 import logging
 import mechanize
-import json
 from flexget.plugin import register_plugin, PluginWarning, PluginError
 import mimetypes
+import youtube_dl
+import cookielib
 
-log = logging.getLogger('spool')
+log = logging.getLogger('youtube_dl')
 
-class PluginZeroPunctuation(object):
+class PluginYoutubeDL(object):
+
     def validator(self):
         from flexget import validator
         root = validator.factory('dict')
-        root.accept('text', key='userid')
-        root.accept('text', key='password')
+        root.accept('text', key='directory')
         return root
 
     def on_process_start(self, feed, config):
         self.browser = mechanize.Browser()
-        self.auth = False
 
-    def on_feed_download(self, feed, config):
-        if not self.auth and not feed.manager.options.test:
-            data = { 'userid': config.get('userid'), 'password': config.get('password') }
-            resp = self.browser.open('https://getspool.com/api/authenticate', urllib.urlencode(data))
-            auth_resp = json.loads(resp.read())
-            self.enqueue_key = auth_resp[u'enqueue_key'].encode('ascii', 'ignore')
-            self.auth = True
+    def on_feed_output(self, feed, config):
+        jar = cookielib.CookieJar()
+        cookie_processor = urllib2.HTTPCookieProcessor(jar)
+        proxy_handler = urllib2.ProxyHandler()
+        opener = urllib2.build_opener(proxy_handler, cookie_processor, youtube_dl.YoutubeDLHandler())
+        urllib2.install_opener(opener)
         for entry in feed.accepted:
             if entry.get('urls'):
                 urls = entry.get('urls')
             else:
                 urls = [entry['url']]
+            pubdate = entry.get('rss_pubdate')
             errors = []
-            for url in urls:
-                if feed.manager.options.test:
-                    log.info('Would spool: %s' % entry['title'])
-                else:
-                    resp = self.browser.open('https://getspool.com/bookmark/' + self.enqueue_key + '?url=' + urllib.quote_plus(url))
-                    js = resp.read()
-                    key = re.search("var key = '([^']+)';", js).group(1)
-                    cver = re.search("var cver = '([^']+)';", js).group(1)
-                    recording = { "type": "record", "url": url, "title": entry['title'] }
-                    data = { "cver": cver, "tk": self.enqueue_key, "k": key.encode('ascii', 'ignore'), "recording": json.dumps(recording) }
-                    resp = self.browser.open('https://getspool.com/bookmark/enqueue', urllib.urlencode(data))
-                    log.info('Spooled: %s' % entry['title'])
+            if not feed.manager.options.test:
+                fd = youtube_dl.FileDownloader({
+                    'usenetrc': None,
+                    'username': None,
+                    'password': None,
+                    'quiet': False,
+                    'forceurl': False,
+                    'forcetitle': False,
+                    'forcethumbnail': False,
+                    'forcedescription': False,
+                    'forcefilename': False,
+                    'forceformat': False,
+                    'simulate': False,
+                    'skip_download': False,
+                    'format': None,
+                    'format_limit': None,
+                    'listformats': None,
+                    'outtmpl': u'%(directory)s/%(year)04d-%(month)02d-%(day)02d-%%(id)s.%%(ext)s' % {'directory': config.get('directory'), 'year': pubdate.year, 'month': pubdate.month, 'day': pubdate.day},
+                    'ignoreerrors': False,
+                    'ratelimit': None,
+                    'nooverwrites': False,
+                    'retries': 10,
+                    'continuedl': True,
+                    'noprogress': False,
+                    'playliststart': 1,
+                    'playlistend': -1,
+                    'logtostderr': False,
+                    'consoletitle': False,
+                    'nopart': False,
+                    'updatetime': True,
+                    'writedescription': False,
+                    'writeinfojson': False,
+                    'writesubtitles': False,
+                    'subtitleslang': None,
+                    'matchtitle': None,
+                    'rejecttitle': None,
+                    'max_downloads': None,
+                    'prefer_free_formats': False,
+                    'verbose': False,
+                    })
+                
+                for extractor in youtube_dl.gen_extractors():
+                    fd.add_info_extractor(extractor)
+                
+                urls = map(lambda url: url.strip(), urls)
+                fd.download(urls)
+        urllib2.install_opener(urllib2.build_opener())
 
 
-register_plugin(PluginZeroPunctuation, 'zeropunctuation', api_ver=2)
+register_plugin(PluginYoutubeDL, 'youtube_dl', api_ver=2)
