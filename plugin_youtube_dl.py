@@ -17,6 +17,7 @@ class PluginYoutubeDL(object):
         from flexget import validator
         root = validator.factory('dict')
         root.accept('text', key='directory')
+        root.accept('text', key='template')
         return root
 
     def on_process_start(self, feed, config):
@@ -52,7 +53,8 @@ class PluginYoutubeDL(object):
                     'format': None,
                     'format_limit': None,
                     'listformats': None,
-                    'outtmpl': u'%(directory)s/%(year)04d-%(month)02d-%(day)02d-%%(id)s.%%(ext)s' % {'directory': config.get('directory'), 'year': pubdate.year, 'month': pubdate.month, 'day': pubdate.day},
+                    'outtmpl': (config.get('directory') and u'%(directory)s/%(year)04d-%(month)02d-%(day)02d-%%(id)s.%%(ext)s' % {'directory': config.get('directory'), 'year': pubdate.year, 'month': pubdate.month, 'day': pubdate.day})
+                        or config.get('template'),
                     'ignoreerrors': False,
                     'ratelimit': None,
                     'nooverwrites': False,
@@ -79,7 +81,7 @@ class PluginYoutubeDL(object):
                 for extractor in youtube_dl.gen_extractors():
                     fd.add_info_extractor(extractor)
                 
-                urls = map(lambda url: url.strip(), urls)
+                urls = map(lambda url: url.encode('utf-8').strip(), urls)
                 fd.download(urls)
         urllib2.install_opener(urllib2.build_opener())
 
